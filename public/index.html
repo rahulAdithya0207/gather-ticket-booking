@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Gather · Book a little joy</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="/socket.io/socket.io.js" defer></script>
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <header><a class="brand" href="/">gather<span>●</span></a><span>Good moments, saved seats.</span></header>
+  <main>
+    <p class="eyebrow">MAKE TIME FOR A GOOD TIME</p>
+    <h1>Your next evening out.</h1>
+    <p class="intro">Pick an event. Find your seat. We'll save you a spot.</p>
+    <section aria-labelledby="events-heading">
+      <h2 id="events-heading">1. Choose your event</h2>
+      <div id="events" class="events"></div>
+    </section>
+    <section id="booking" class="booking" hidden aria-labelledby="seat-heading">
+      <div>
+        <p class="eyebrow" id="event-category"></p>
+        <h2 id="seat-heading">2. Choose your seat</h2>
+        <p id="event-details" class="muted"></p>
+        <div class="stage">S T A G E</div>
+        <div id="seats" class="seats" aria-label="Seats"></div>
+        <p class="legend">○ Available &nbsp; <span>● Selected</span> &nbsp; ◼ Booked</p>
+        <button id="refresh" class="secondary" type="button">Refresh availability</button>
+        <p id="live-status" class="small muted" role="status">Connecting to live updates…</p>
+      </div>
+      <aside>
+        <h2>Your evening</h2>
+        <p id="chosen-event"></p>
+        <div class="summary"><span>Seat</span><strong id="chosen-seat">Choose a seat</strong></div>
+        <div class="summary"><span>Total</span><strong id="price"></strong></div>
+        <button id="book" type="button" disabled>Book this seat</button>
+        <p class="muted small">Demo booking · No payment required</p>
+      </aside>
+    </section>
+    <p id="message" role="status" aria-live="polite">Loading events…</p>
+    <section id="receipt" class="receipt" hidden aria-labelledby="receipt-heading">
+      <p class="eyebrow">YOU'RE GOING!</p><h2 id="receipt-heading">Your seat is booked.</h2>
+      <p id="receipt-details"></p><p class="small">Save this booking reference:</p><code id="reference"></code>
+    </section>
+  </main>
+  <footer>Gather · A small ticket booking project</footer>
+</body>
+</html>

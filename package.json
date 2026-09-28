@@ -1,0 +1,25 @@
+{
+  "name": "gather-beginner-booking",
+  "version": "1.0.0",
+  "private": true,
+  "description": "A small ticket booking app demonstrating atomic seat booking",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "test": "node --test booking.test.js"
+  },
+  "engines": {
+    "node": "24.x"
+  },
+  "dependencies": {
+    "dotenv": "^17.2.3",
+    "express": "^4.21.2",
+    "ioredis": "^5.11.1",
+    "mongoose": "^8.19.1",
+    "socket.io": "^4.8.4"
+  },
+  "devDependencies": {
+    "socket.io-client": "^4.8.4"
+  }
+}
