@@ -3,6 +3,11 @@
 A small web app: choose an event, select one seat, and get a booking reference.
 The sample events are demonstrations with no real dates or payments.
 
+**Live demo:** https://gather-ticket-booking.onrender.com
+
+The demo uses Render's free plan, so the first visit after inactivity may take
+longer while the server wakes up. Cloud bookings are separate from local Docker data.
+
 ## Five application files
 
 | File | Responsibility |
@@ -128,21 +133,19 @@ booking, and real-time seat availability updates using Socket.io.
 This version does not use React, TypeScript, Strategy, Factory, or Repository
 patterns. The original larger project is backed up separately.
 
-## Our next steps
+## Deployment
 
-1. Run the smaller app locally and try booking a seat.
-2. Resume tutor mode with HTML, browser JavaScript, HTTP, and the server.
-3. Explain and demonstrate the atomic booking update with two browser tabs.
-4. Push this version to your GitHub repository.
-5. Deploy the app to a host supporting a persistent Node.js server, with hosted
-   MongoDB and Redis.
+The live demo runs on a free Render web service, with Render Key Value for Redis
+and a MongoDB Atlas M0 cluster. Both Render services and the Atlas cluster are in
+Singapore. Atlas permits the Render service's outbound IP ranges, and the app's
+database user has read/write access to the `gather_beginner` database.
 
 For example, Render web services support WebSocket connections. Build with
 `npm ci` and start with `npm start`. Set `MONGODB_URI` and `REDIS_URL` to hosted
 service URLs and configure their network access. Use one app instance. Local
 Docker addresses cannot work from the cloud. There is no frontend build step.
-Check available free tiers and limits when we deploy; GitHub and hosting account
-access will be needed then. The previous Vercel-only setup instructions no longer
-describe this persistent Socket.io server.
+Connection credentials are configured in Render's environment settings and are
+not included in this repository. The previous Vercel-only setup instructions no
+longer describe this persistent Socket.io server.
 
 Reference: [WebSockets on Render](https://render.com/docs/websocket).
