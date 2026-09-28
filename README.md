@@ -16,7 +16,7 @@ longer while the server wakes up. Cloud bookings are separate from local Docker 
 | `public/style.css` | Colors, spacing, and mobile layout |
 | `public/app.js` | Button clicks, requests to the server, and page updates |
 | `server.js` | Express routes, MongoDB connection, and booking logic |
-| `redis.js` | Two small functions to acquire and release a temporary seat lock |
+| `redis.js` | Redis request locks and expiring, owner-checked seat reservations |
 
 Read them in that order. The other files are setup (`package.json`, its generated
 lockfile, `.env.example`, `.gitignore`), this guide, and one integration test.
@@ -44,19 +44,21 @@ You can also use an existing MongoDB database: put its connection string in `.en
 as `MONGODB_URI` and skip the MongoDB Docker command. Set `REDIS_URL` to your Redis
 connection string (the local default is `redis://127.0.0.1:6379`). Never commit `.env`.
 
-## Booking safety: Redis lock and atomic database update
+## Seat holds and booking safety
 
-Two browsers might both show A1 as available. They might click Book together.
-Checking availability in JavaScript alone would not protect the seat.
+Selecting a seat creates a Redis reservation owned by that browser tab. Other
+tabs immediately receive a live update and cannot select or book it. Clicking the
+selected seat again, changing events, or completing a booking releases the hold.
+Every hold expires after one minute, even if the first user leaves the seat selected.
+The browser automatically clears that selection, and other tabs make the seat
+available again at the same deadline.
 
-First, `lockSeat()` runs `SET gather:lock:seatId token PX 10000 NX` in Redis.
-`NX` means only create the lock if it does not exist. `PX 10000` means it expires
-after ten seconds. The random token identifies the request that owns the lock.
-Other requests for that seat get HTTP 409 while the lock is held. Servers sharing
-the same Redis and key prefix share these locks; this is a distributed lock backed
-by one Redis server, not a multi-node Redlock implementation.
+Selection and booking briefly share a Redis request lock so they cannot race while
+checking MongoDB. A separate owner-checked reservation lasts one minute. Release
+compares the owner before deleting, so one
+browser cannot release another browser's hold.
 
-The server then asks MongoDB to do this in a single operation:
+Booking verifies the active reservation, then asks MongoDB to do this atomically:
 
 ```js
 Seat.findOneAndUpdate(
@@ -75,11 +77,10 @@ MongoDB makes a single document update atomic: the availability check and change
 cannot be separated by another competing write. This also works when more than
 one server handles requests to the same database.
 
-Finally, `unlockSeat()` checks the token and removes the lock using a short Lua
-script. Those two steps run together in Redis. An old request cannot remove a
-new request's lock. A failed release is logged; the lock expires automatically.
-If Redis is unavailable, booking fails with 503. If a lock expires too early,
-MongoDB's conditional update still prevents double booking.
+The `booked: false` filter prevents double booking even if a Redis hold expires
+during a slow request. `unlockSeat()` checks the request token before removing a
+short-lived lock; a failed release is logged and the lock expires automatically.
+If Redis is unavailable, selection and booking fail with 503.
 
 Reference: [MongoDB atomic writes](https://www.mongodb.com/docs/manual/core/write-operations-atomicity/).
 Lock reference: [Redis locking](https://redis.io/docs/latest/develop/clients/patterns/distributed-locks/).
@@ -88,17 +89,15 @@ Lock reference: [Redis locking](https://redis.io/docs/latest/develop/clients/pat
 
 1. `app.js` requests `GET /api/events` and displays event buttons.
 2. Choosing an event requests `GET /api/events/:id/seats`.
-3. Clicking Book sends `POST /api/bookings` with `eventId` and `seatLabel`.
-4. `server.js` validates input, acquires a Redis lock, and performs the atomic update.
-5. Socket.io broadcasts `seat:booked` with the event and seat; browsers update that seat.
-6. The booking browser displays its reference. The server releases the Redis lock.
+3. Selecting or unselecting a seat calls `POST` or `DELETE /api/selections`.
+4. Socket.io broadcasts temporary holds and releases to other browser tabs.
+5. Clicking Book verifies the hold and sends `POST /api/bookings`.
+6. The booking browser displays its reference after MongoDB confirms the booking.
 
-Availability updates live after a booking. Open two tabs, select the same event,
-and book a seat in one tab: it becomes unavailable in the other tab automatically.
-On reconnect, the browser fetches the latest seats because socket events may be
-missed while disconnected. It remembers booked seats so a slower HTTP response
+Open two tabs, select the same event, and choose a seat in one tab: it becomes
+unavailable in the other tab immediately. Reconnect refreshes availability in case
+socket events were missed. Booked seats are remembered so a slower HTTP response
 cannot overwrite a newer live update. You can still refresh availability manually.
-These updates show confirmed bookings, not temporary Redis holds.
 
 ## Check the core behavior
 
@@ -113,7 +112,8 @@ unique key prefix so they do not contend with the running demo.
 ## Deliberate limits
 
 This is a learning demo with anonymous bookings. There are no accounts, payments,
-checkout holds, or refunds. Anyone can book an available seat.
+or refunds. Seat selections are temporary holds, not paid checkout reservations.
+Anyone can book an available seat.
 Save the displayed reference before reloading; there is no booking history or
 recovery screen. A lost network response can hide a successful booking, so refresh
 availability before retrying. Prices come from the server's sample event list.

@@ -3,18 +3,36 @@ let selectedEvent = null;
 let selectedSeat = null;
 let seats = [];
 let busy = false;
+const reservationTimers = new Map();
+const ownerId = sessionStorage.getItem('seatOwnerId') || crypto.randomUUID();
+sessionStorage.setItem('seatOwnerId', ownerId);
 const get = (id) => document.getElementById(id);
 const money = (amount) => '₹' + amount;
 
 // Remember live bookings so a slower seat-list response cannot undo them.
 const knownBookings = new Set();
-const socket = io();
+const socket = io({ auth: { ownerId } });
 socket.on('seat:booked', ({ eventId, seatLabel }) => {
   knownBookings.add(eventId + '-' + seatLabel);
   if (selectedEvent?.id !== eventId) return;
   const seat = seats.find((seat) => seat.label === seatLabel);
   if (seat) seat.booked = true;
   if (selectedSeat === seatLabel) selectedSeat = null;
+  renderSeats();
+});
+socket.on('seat:reserved', ({ eventId, seatLabel, reserved, reservationTtlMs }) => {
+  const seat = seats.find((item) => item.label === seatLabel);
+  if (seat && selectedEvent?.id === eventId) {
+    seat.reserved = reserved;
+    renderSeats();
+  }
+  scheduleReservationExpiry(eventId, seatLabel, reservationTtlMs);
+});
+socket.on('seat:released', ({ eventId, seatLabel }) => {
+  clearReservationTimer(eventId + '-' + seatLabel);
+  if (selectedEvent?.id !== eventId) return;
+  const seat = seats.find((item) => item.label === seatLabel);
+  if (seat) { seat.reserved = false; seat.reservationTtlMs = 0; }
   renderSeats();
 });
 socket.on('connect', async () => {
@@ -39,16 +57,44 @@ async function request(url, options) {
   return data;
 }
 
+function clearReservationTimer(seatKey) {
+  clearTimeout(reservationTimers.get(seatKey));
+  reservationTimers.delete(seatKey);
+}
+
+function scheduleReservationExpiry(eventId, seatLabel, ttlMs) {
+  const seatKey = eventId + '-' + seatLabel;
+  clearReservationTimer(seatKey);
+  if (!ttlMs || ttlMs <= 0) return;
+  const deadline = Date.now() + ttlMs;
+  reservationTimers.set(seatKey, setTimeout(() => {
+    reservationTimers.delete(seatKey);
+    const seat = selectedEvent?.id === eventId ? seats.find((item) => item.label === seatLabel) : null;
+    if (seat) {
+      seat.reserved = false;
+      seat.reservationTtlMs = 0;
+    }
+    if (selectedEvent?.id === eventId && selectedSeat === seatLabel) {
+      selectedSeat = null;
+      get('message').textContent = 'Your seat selection expired. Please select it again if it is available.';
+    }
+    if (selectedEvent?.id === eventId) {
+      renderSeats();
+      loadSeats().then(renderSeats).catch(() => {});
+    }
+  }, Math.max(0, deadline - Date.now()) + 50));
+}
+
 function renderSeats() {
   get('seats').replaceChildren();
   for (const seat of seats) {
     const button = document.createElement('button');
     button.textContent = seat.label;
-    button.className = 'seat' + (seat.booked ? ' booked' : '') + (selectedSeat === seat.label ? ' selected' : '');
-    button.disabled = seat.booked || busy;
-    button.setAttribute('aria-label', seat.label + (seat.booked ? ', booked' : ', available'));
+    button.className = 'seat' + (seat.booked ? ' booked' : '') + (seat.reserved ? ' reserved' : '') + (selectedSeat === seat.label ? ' selected' : '');
+    button.disabled = seat.booked || seat.reserved || busy;
+    button.setAttribute('aria-label', seat.label + (seat.booked ? ', booked' : seat.reserved ? ', selected by another user' : ', available'));
     button.setAttribute('aria-pressed', String(selectedSeat === seat.label));
-    button.onclick = () => { selectedSeat = seat.label; renderSeats(); };
+    button.onclick = () => selectSeat(seat.label);
     get('seats').append(button);
   }
   get('chosen-seat').textContent = selectedSeat || 'Choose a seat';
@@ -60,7 +106,7 @@ function renderSeats() {
 
 async function loadSeats() {
   const eventId = selectedEvent.id;
-  const latestSeats = await request('/api/events/' + eventId + '/seats');
+  const latestSeats = await request('/api/events/' + eventId + '/seats?ownerId=' + encodeURIComponent(ownerId));
   if (selectedEvent.id !== eventId) return;
   for (const seat of latestSeats) {
     const seatId = eventId + '-' + seat.label;
@@ -68,15 +114,66 @@ async function loadSeats() {
     if (knownBookings.has(seatId)) seat.booked = true;
   }
   seats = latestSeats;
-  if (seats.find((seat) => seat.label === selectedSeat)?.booked) selectedSeat = null;
+  for (const seat of seats) scheduleReservationExpiry(eventId, seat.label, seat.reservationTtlMs);
+  if (seats.find((seat) => seat.label === selectedSeat)?.booked || seats.find((seat) => seat.label === selectedSeat)?.reserved) selectedSeat = null;
+}
+
+async function selectSeat(seatLabel) {
+  if (busy || !selectedEvent) return;
+  const eventId = selectedEvent.id;
+  busy = true;
+  renderSeats();
+  try {
+    if (selectedSeat === seatLabel) {
+      await request('/api/selections', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ eventId, seatLabel, ownerId }),
+      });
+      selectedSeat = null;
+      get('message').textContent = '';
+    } else {
+      if (selectedSeat) {
+        await request('/api/selections', {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ eventId, seatLabel: selectedSeat, ownerId }),
+        });
+      }
+      await request('/api/selections', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ eventId, seatLabel, ownerId }),
+      });
+      selectedSeat = seatLabel;
+      get('message').textContent = '';
+    }
+    await loadSeats();
+  } catch (error) {
+    selectedSeat = null;
+    get('message').textContent = error.message;
+    try { await loadSeats(); } catch { /* Keep the selection error visible. */ }
+  } finally {
+    busy = false;
+    renderSeats();
+  }
 }
 
 async function chooseEvent(event) {
   if (busy) return;
+  busy = true;
+  if (selectedEvent && selectedSeat) {
+    try {
+      await request('/api/selections', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ eventId: selectedEvent.id, seatLabel: selectedSeat, ownerId }),
+      });
+    } catch { /* The reservation expires automatically if release fails. */ }
+  }
   selectedEvent = event;
   selectedSeat = null;
   seats = [];
-  busy = true;
   get('booking').hidden = false;
   get('receipt').hidden = true;
   get('event-category').textContent = event.category;
@@ -114,9 +211,10 @@ get('book').onclick = async () => {
     const booking = await request('/api/bookings', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ eventId: selectedEvent.id, seatLabel }),
+      body: JSON.stringify({ eventId: selectedEvent.id, seatLabel, ownerId }),
     });
     knownBookings.add(selectedEvent.id + '-' + seatLabel);
+    clearReservationTimer(selectedEvent.id + '-' + seatLabel);
     seats.find((seat) => seat.label === seatLabel).booked = true;
     selectedSeat = null;
     get('receipt-details').textContent = booking.event + ' · Seat ' + booking.seat + ' · ' + money(booking.price);
@@ -124,6 +222,14 @@ get('book').onclick = async () => {
     get('receipt').hidden = false;
     get('message').textContent = 'Booking confirmed.';
   } catch (error) {
+    try {
+      await request('/api/selections', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ eventId: selectedEvent.id, seatLabel, ownerId }),
+      });
+    } catch { /* The reservation expires automatically if release fails. */ }
+    selectedSeat = null;
     get('message').textContent = error.message;
     try { await loadSeats(); } catch { /* Keep the original booking error visible. */ }
   } finally { busy = false; renderSeats(); }

@@ -4,7 +4,7 @@ const { randomUUID } = require('node:crypto');
 const path = require('node:path');
 const { createServer } = require('node:http');
 const { Server } = require('socket.io');
-const { redis, lockSeat, unlockSeat } = require('./redis');
+const { redis, lockSeat, unlockSeat, reserveSeat, releaseSeat, getSeatReservation } = require('./redis');
 require('dotenv').config({ quiet: true });
 
 const app = express();
@@ -70,16 +70,77 @@ app.get('/api/events/:id/seats', async (req, res, next) => {
     return res.status(404).json({ error: 'Event not found.' });
   }
   try {
+    const event = events.find((item) => item.id === req.params.id);
     const seats = await Seat.find({ eventId: req.params.id }).select('label booked -_id').sort({ label: 1 });
-    res.json(seats);
+    const reservations = await Promise.all(seats.map((seat) => getSeatReservation(event.id + '-' + seat.label)));
+    res.json(seats.map((seat, index) => ({
+      ...seat.toObject(),
+      reserved: Boolean(reservations[index] && reservations[index].ownerId !== req.query.ownerId),
+      reservationTtlMs: reservations[index]?.ttlMs || 0,
+    })));
   } catch (error) { next(error); }
 });
 
-// 4. Get a Redis lock, save atomically in MongoDB, then notify connected browsers.
+function validOwnerId(ownerId) {
+  return typeof ownerId === 'string' && /^[\da-f-]{36}$/i.test(ownerId);
+}
+
+io.on('connection', (socket) => {
+  socket.data.ownerId = validOwnerId(socket.handshake.auth.ownerId) ? socket.handshake.auth.ownerId : null;
+});
+
+function broadcastReservation(eventId, seatLabel, ownerId, reservationTtlMs) {
+  for (const socket of io.sockets.sockets.values()) {
+    socket.emit('seat:reserved', { eventId, seatLabel, reserved: socket.data.ownerId !== ownerId, reservationTtlMs });
+  }
+}
+
+app.post('/api/selections', async (req, res, next) => {
+  const { eventId, seatLabel, ownerId } = req.body || {};
+  const event = events.find((item) => item.id === eventId);
+  if (!event || typeof seatLabel !== 'string' || !/^[A-D][1-6]$/.test(seatLabel) || !validOwnerId(ownerId)) {
+    return res.status(400).json({ error: 'Choose a valid event and seat.' });
+  }
+  const seatId = eventId + '-' + seatLabel;
+  let lockToken;
+  try {
+    lockToken = await lockSeat(seatId);
+    if (!lockToken) return res.status(409).json({ error: 'This seat is being booked. Please try again.' });
+    const seat = await Seat.findById(seatId).select('booked');
+    if (!seat || seat.booked) return res.status(409).json({ error: 'This seat is already booked.' });
+    if (!await reserveSeat(seatId, ownerId)) {
+      return res.status(409).json({ error: 'This seat is selected by someone else. Please choose another.' });
+    }
+    const reservation = await getSeatReservation(seatId);
+    broadcastReservation(eventId, seatLabel, ownerId, reservation.ttlMs);
+    res.status(200).json({ reserved: true, reservationTtlMs: reservation.ttlMs });
+  } catch (error) { next(error); }
+  finally {
+    if (lockToken) {
+      try { await unlockSeat(seatId, lockToken); }
+      catch { console.error('Lock release failed; it will expire automatically.'); }
+    }
+  }
+});
+
+app.delete('/api/selections', async (req, res, next) => {
+  const { eventId, seatLabel, ownerId } = req.body || {};
+  const event = events.find((item) => item.id === eventId);
+  if (!event || typeof seatLabel !== 'string' || !/^[A-D][1-6]$/.test(seatLabel) || !validOwnerId(ownerId)) {
+    return res.status(400).json({ error: 'Choose a valid event and seat.' });
+  }
+  try {
+    const released = await releaseSeat(eventId + '-' + seatLabel, ownerId);
+    if (released) io.emit('seat:released', { eventId, seatLabel });
+    res.json({ released });
+  } catch (error) { next(error); }
+});
+
+// 4. Verify the active reservation, save atomically in MongoDB, then notify browsers.
 app.post('/api/bookings', async (req, res, next) => {
-  const { eventId, seatLabel } = req.body || {};
+  const { eventId, seatLabel, ownerId } = req.body || {};
   const event = events.find((event) => event.id === eventId);
-  if (!event || typeof seatLabel !== 'string' || !/^[A-D][1-6]$/.test(seatLabel)) {
+  if (!event || typeof seatLabel !== 'string' || !/^[A-D][1-6]$/.test(seatLabel) || !validOwnerId(ownerId)) {
     return res.status(400).json({ error: 'Choose a valid event and seat.' });
   }
   const seatId = eventId + '-' + seatLabel;
@@ -87,6 +148,9 @@ app.post('/api/bookings', async (req, res, next) => {
   try {
     lockToken = await lockSeat(seatId);
     if (!lockToken) return res.status(409).json({ error: 'This seat is being booked. Please try another seat.' });
+    if ((await getSeatReservation(seatId))?.ownerId !== ownerId) {
+      return res.status(409).json({ error: 'Your seat selection has expired. Please select the seat again.' });
+    }
     // MongoDB still protects the seat if the Redis lock expires during a slow request.
     const seat = await Seat.findOneAndUpdate(
       { _id: seatId, booked: false },
@@ -94,6 +158,8 @@ app.post('/api/bookings', async (req, res, next) => {
       { new: true },
     );
     if (!seat) return res.status(409).json({ error: 'Someone already booked this seat. Please choose another.' });
+    try { await releaseSeat(seatId, ownerId); }
+    catch { console.error('Reservation release failed; it will expire automatically.'); }
     io.emit('seat:booked', { eventId, seatLabel });
     res.status(201).json({ bookingId: seat.bookingId, event: event.name, seat: seat.label, price: event.price });
   } catch (error) { next(error); }

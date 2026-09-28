@@ -29,6 +29,7 @@ button:disabled { cursor: not-allowed; }
 .seats { display: grid; grid-template-columns: repeat(6, 1fr); gap: 9px; }
 .seat { min-height: 40px; border: 1px solid #aab9ae; border-radius: 7px; color: #335345; background: white; }
 .seat.selected { background: #28614d; border-color: #28614d; color: white; }
+.seat.reserved { background: #f2ddd2; border-color: #e5ad91; color: #824a30; }
 .seat.booked { background: #e8e8e4; border-color: #e8e8e4; color: #777d78; text-decoration: line-through; }
 .legend { font-size: 12px; color: #68766e; text-align: center; margin: 22px 0; }
 .legend span { color: #28614d; }
