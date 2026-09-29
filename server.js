@@ -5,12 +5,15 @@ const path = require('node:path');
 const { createServer } = require('node:http');
 const { Server } = require('socket.io');
 const { redis, lockSeat, unlockSeat, reserveSeat, releaseSeat, getSeatReservation } = require('./redis');
+const rateLimiter = require('./rateLimiter');
 require('dotenv').config({ quiet: true });
 
 const app = express();
 const server = createServer(app);
 const io = new Server(server);
 app.disable('x-powered-by');
+
+app.use('/api', rateLimiter);
 app.use(express.json({ limit: '2kb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 

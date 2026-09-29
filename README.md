@@ -1,14 +1,15 @@
 # Gather — beginner ticket booking
 
-A small web app: choose an event, select one seat, and get a booking reference.
-The sample events are demonstrations with no real dates or payments.
+A small ticket booking app built with Express, MongoDB, Redis, and Socket.io.
+Pick an event, choose a seat, and book it. Seat availability updates live across
+browser tabs. The events are sample data, and no payments are involved.
 
 **Live demo:** https://gather-ticket-booking.onrender.com
 
 The demo uses Render's free plan, so the first visit after inactivity may take
 longer while the server wakes up. Cloud bookings are separate from local Docker data.
 
-## Five application files
+## Project files
 
 | File | Responsibility |
 | --- | --- |
@@ -17,10 +18,10 @@ longer while the server wakes up. Cloud bookings are separate from local Docker 
 | `public/app.js` | Button clicks, requests to the server, and page updates |
 | `server.js` | Express routes, MongoDB connection, and booking logic |
 | `redis.js` | Redis request locks and expiring, owner-checked seat reservations |
+| `rateLimiter.js` | Limits API requests using the existing Redis connection |
 
-Read them in that order. The other files are setup (`package.json`, its generated
-lockfile, `.env.example`, `.gitignore`), this guide, and one integration test.
-`node_modules` contains installed dependencies; do not read or edit it.
+`booking.test.js` covers the booking flow. The remaining files handle setup and
+dependencies.
 
 ## Run locally
 
@@ -80,12 +81,30 @@ one server handles requests to the same database.
 The `booked: false` filter prevents double booking even if a Redis hold expires
 during a slow request. `unlockSeat()` checks the request token before removing a
 short-lived lock; a failed release is logged and the lock expires automatically.
-If Redis is unavailable, selection and booking fail with 503.
+If Redis is unavailable, API requests fail with 503.
 
 Reference: [MongoDB atomic writes](https://www.mongodb.com/docs/manual/core/write-operations-atomicity/).
 Lock reference: [Redis locking](https://redis.io/docs/latest/develop/clients/patterns/distributed-locks/).
 
-## Request flow
+## Rate limiting
+
+API routes share a limit of **100 requests per IP in 60 seconds**. The window
+starts with the first request. Redis stores the count and expires it automatically;
+simultaneous requests update the counter atomically.
+
+Once the limit is reached, further requests return `429 Too Many Requests`.
+The `Retry-After` header tells the client how many seconds to wait. Page assets
+and Socket.io traffic are outside this limit.
+
+The middleware lives in `rateLimiter.js` and runs before the API routes in
+`server.js`. It reuses the existing Redis connection and adds no dependencies.
+Seat holds, locking, and booking logic work as before.
+
+The limit uses Express's `req.ip`. Behind a reverse proxy, configure `trust proxy`
+for that deployment so visitors are counted separately; with the current default,
+requests through the same proxy can share a limit.
+
+## How booking works
 
 1. `app.js` requests `GET /api/events` and displays event buttons.
 2. Choosing an event requests `GET /api/events/:id/seats`.
@@ -99,7 +118,7 @@ unavailable in the other tab immediately. Reconnect refreshes availability in ca
 socket events were missed. Booked seats are remembered so a slower HTTP response
 cannot overwrite a newer live update. You can still refresh availability manually.
 
-## Check the core behavior
+## Tests
 
 Start both local containers, then run `npm test`.
 The test uses a uniquely named temporary database on port 27018 and removes only
@@ -109,7 +128,7 @@ It also checks Redis contention and token ownership, live socket notifications,
 input validation, event isolation, and public seat responses. Redis tests use a
 unique key prefix so they do not contend with the running demo.
 
-## Deliberate limits
+## Limitations
 
 This is a learning demo with anonymous bookings. There are no accounts, payments,
 or refunds. Seat selections are temporary holds, not paid checkout reservations.
@@ -123,15 +142,6 @@ to that instance; multiple instances would need a Socket.io adapter. The locks a
 database protection can be shared, but cross-instance live delivery is not implemented.
 There is no durable notification queue: if the server stops after saving, clients
 learn the result from their next snapshot. This keeps the example small.
-
-## Accurate resume wording for this version
-
-Built a ticket booking web app with JavaScript, Node.js, Express, and MongoDB.
-Added Redis-based seat locking with atomic database updates to prevent double
-booking, and real-time seat availability updates using Socket.io.
-
-This version does not use React, TypeScript, Strategy, Factory, or Repository
-patterns. The original larger project is backed up separately.
 
 ## Deployment
 
