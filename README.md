@@ -89,14 +89,14 @@ Lock reference: [Redis locking](https://redis.io/docs/latest/develop/clients/pat
 ## Rate limiting
 
 API routes use a **token bucket per IP**, stored in Redis. Each bucket starts with
-100 tokens, and each API request spends one. Tokens refill at 100 per minute
-(one every 600 ms), up to a maximum of 100. This allows short bursts while
+20 tokens, and each API request spends one. Tokens refill at 100 per minute
+(one every 600 ms), up to a maximum of 20. This allows short bursts while
 keeping sustained traffic to about 100 requests per minute.
 
 When there isn't a full token available, the request returns `429 Too Many
 Requests`. The `Retry-After` header gives the wait for the next token, rounded
 up to whole seconds. A Lua script refills and spends tokens atomically using
-Redis's clock. Idle buckets expire after a minute, when they would be full again.
+Redis's clock. Idle buckets expire after 12 seconds, when they would be full again.
 Page assets and Socket.io traffic are outside this limit.
 
 The middleware lives in `rateLimiter.js` and runs before the API routes in

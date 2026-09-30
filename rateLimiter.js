@@ -1,8 +1,8 @@
 const { redis } = require('./redis');
 
-// Each IP can burst up to 100 requests; one token refills every 600 ms.
-const bucketCapacity = 100;
-const refillPeriodMs = 60_000;
+// Each IP can burst up to 20 requests; one token refills every 600 ms.
+const bucketCapacity = 20;
+const refillPeriodMs = 12_000;
 const rateLimitPrefix = (process.env.REDIS_KEY_PREFIX || 'gather:lock:') + 'token-bucket:';
 
 async function rateLimiter(req, res, next) {
