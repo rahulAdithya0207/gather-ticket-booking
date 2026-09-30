@@ -41,6 +41,10 @@ aside { background: #f8f7f2; padding: 25px; border-radius: 10px; align-self: sta
 .summary { display: flex; justify-content: space-between; gap: 12px; padding: 18px 0; border-bottom: 1px solid #dedfd6; font-size: 14px; }
 #book { width: 100%; padding: 14px; margin-top: 24px; background: #28614d; color: white; border: 0; border-radius: 7px; }
 #book:disabled { background: #b2beb5; }
+.checkout-countdown { margin-top: 20px; padding: 16px; border: 1px solid #cad5cd; border-radius: 8px; background: #e8efdf; }
+.checkout-countdown strong { display: block; margin-top: 8px; font-size: 30px; font-variant-numeric: tabular-nums; }
+.checkout-countdown p { margin-bottom: 0; }
+.checkout-countdown.urgent { background: #f2ddd2; border-color: #e5ad91; color: #824a30; }
 .small { font-size: 12px; line-height: 1.6; }
 #message { line-height: 1.6; }
 .receipt { padding: 26px; background: #e8efdf; border-radius: 12px; margin-top: 24px; }

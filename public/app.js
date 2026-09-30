@@ -4,6 +4,7 @@ let selectedSeat = null;
 let seats = [];
 let busy = false;
 const reservationTimers = new Map();
+const reservationDeadlines = new Map();
 const ownerId = sessionStorage.getItem('seatOwnerId') || crypto.randomUUID();
 sessionStorage.setItem('seatOwnerId', ownerId);
 const get = (id) => document.getElementById(id);
@@ -60,15 +61,35 @@ async function request(url, options) {
 function clearReservationTimer(seatKey) {
   clearTimeout(reservationTimers.get(seatKey));
   reservationTimers.delete(seatKey);
+  reservationDeadlines.delete(seatKey);
 }
+
+function updateCheckoutCountdown() {
+  const deadline = selectedEvent && selectedSeat
+    ? reservationDeadlines.get(selectedEvent.id + '-' + selectedSeat) : null;
+  const panel = get('checkout-countdown');
+  panel.hidden = !deadline;
+  if (!deadline) return;
+  const seconds = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
+  get('checkout-time').textContent = String(Math.floor(seconds / 60)).padStart(2, '0')
+    + ':' + String(seconds % 60).padStart(2, '0');
+  panel.classList.toggle('urgent', seconds <= 10);
+  if (seconds === 0) get('book').disabled = true;
+}
+
+// Use the hold deadline, so background tabs don't pause the countdown.
+setInterval(updateCheckoutCountdown, 250);
+document.addEventListener('visibilitychange', updateCheckoutCountdown);
 
 function scheduleReservationExpiry(eventId, seatLabel, ttlMs) {
   const seatKey = eventId + '-' + seatLabel;
   clearReservationTimer(seatKey);
   if (!ttlMs || ttlMs <= 0) return;
   const deadline = Date.now() + ttlMs;
+  reservationDeadlines.set(seatKey, deadline);
   reservationTimers.set(seatKey, setTimeout(() => {
     reservationTimers.delete(seatKey);
+    reservationDeadlines.delete(seatKey);
     const seat = selectedEvent?.id === eventId ? seats.find((item) => item.label === seatLabel) : null;
     if (seat) {
       seat.reserved = false;
@@ -102,6 +123,7 @@ function renderSeats() {
   get('book').textContent = busy ? 'Please wait…' : 'Book this seat';
   get('refresh').disabled = busy;
   for (const button of get('events').children) button.disabled = busy;
+  updateCheckoutCountdown();
 }
 
 async function loadSeats() {
@@ -140,12 +162,13 @@ async function selectSeat(seatLabel) {
           body: JSON.stringify({ eventId, seatLabel: selectedSeat, ownerId }),
         });
       }
-      await request('/api/selections', {
+      const reservation = await request('/api/selections', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ eventId, seatLabel, ownerId }),
       });
       selectedSeat = seatLabel;
+      scheduleReservationExpiry(eventId, seatLabel, reservation.reservationTtlMs);
       get('message').textContent = '';
     }
     await loadSeats();
@@ -201,6 +224,13 @@ get('refresh').onclick = async () => {
 
 get('book').onclick = async () => {
   if (busy || !selectedSeat) return;
+  const deadline = reservationDeadlines.get(selectedEvent.id + '-' + selectedSeat);
+  if (!deadline || deadline <= Date.now()) {
+    get('message').textContent = 'Your checkout time expired. Please select a seat again.';
+    selectedSeat = null;
+    renderSeats();
+    return;
+  }
   // A live update can clear selectedSeat while this request is waiting.
   const seatLabel = selectedSeat;
   busy = true;

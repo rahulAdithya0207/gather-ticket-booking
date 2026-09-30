@@ -54,6 +54,11 @@ Every hold expires after one minute, even if the first user leaves the seat sele
 The browser automatically clears that selection, and other tabs make the seat
 available again at the same deadline.
 
+The checkout panel shows a `01:00` countdown when you select a seat, using the
+remaining Redis hold time. It highlights the last 10 seconds and disables booking
+when time runs out. Refreshing availability does not restart the hold. This is a
+demo payment deadline; the app does not collect payment details or charge money.
+
 Selection and booking briefly share a Redis request lock so they cannot race while
 checking MongoDB. A separate owner-checked reservation lasts one minute. Release
 compares the owner before deleting, so one
