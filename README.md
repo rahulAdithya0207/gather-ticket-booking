@@ -109,8 +109,13 @@ requests through the same proxy can share a limit.
 
 ## How booking works
 
-1. `app.js` requests `GET /api/events` and displays event buttons.
-2. Choosing an event requests `GET /api/events/:id/seats`.
+The homepage lists events. Each event opens its own booking page:
+`/events/jazz-night`, `/events/comedy-club`, or `/events/indie-evening`.
+You can share or refresh these URLs. They use the same booking code and API routes.
+Use **Back to all events** to return to the list; any selected seat is released.
+
+1. `app.js` requests `GET /api/events` and displays event links.
+2. Opening an event page requests `GET /api/events/:id/seats`.
 3. Selecting or unselecting a seat calls `POST` or `DELETE /api/selections`.
 4. Socket.io broadcasts temporary holds and releases to other browser tabs.
 5. Clicking Book verifies the hold and sends `POST /api/bookings`.

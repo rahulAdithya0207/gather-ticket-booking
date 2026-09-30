@@ -21,6 +21,9 @@ button:disabled { cursor: not-allowed; }
 .event:nth-child(2) { background: #e8ecdf; }
 .event:nth-child(3) { background: #f0e2dc; }
 .event.active { border-color: #28614d; }
+.event { display: block; text-decoration: none; }
+.event:hover { border-color: #28614d; }
+.back-link { display: inline-block; margin-top: 12px; color: #28614d; }
 .event small { text-transform: uppercase; letter-spacing: 1px; }
 .event p { color: #546257; font-size: 14px; }
 .event strong { display: block; margin-top: 25px; font-size: 14px; }

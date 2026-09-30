@@ -236,22 +236,63 @@ get('book').onclick = async () => {
 };
 
 async function start() {
+  const eventPath = window.location.pathname.match(/^\/events\/([^/]+)\/?$/);
+  if (eventPath) {
+    get('event-list').hidden = true;
+    get('all-events').hidden = false;
+    get('page-title').textContent = 'Loading event...';
+    get('page-intro').textContent = 'Choose your seat and book your evening.';
+  }
   try {
     const events = await request('/api/events');
+    if (eventPath) {
+      const event = events.find((item) => item.id === eventPath[1]);
+      if (!event) {
+        get('page-title').textContent = 'Event not found';
+        get('message').textContent = 'Return to all events to choose another event.';
+        return;
+      }
+      document.title = event.name + ' | Gather';
+      get('page-title').textContent = event.name;
+      get('page-intro').textContent = event.venue + ' | ' + event.schedule;
+      await chooseEvent(event);
+      return;
+    }
     for (const event of events) {
-      const button = document.createElement('button');
+      const button = document.createElement('a');
       button.className = 'event';
       button.dataset.id = event.id;
-      button.setAttribute('aria-pressed', 'false');
+      button.href = '/events/' + encodeURIComponent(event.id);
       for (const [tag, text] of [['small', event.category], ['h3', event.name], ['p', event.venue], ['strong', money(event.price) + ' / seat']]) {
         const element = document.createElement(tag);
         element.textContent = text;
         button.append(element);
       }
-      button.onclick = () => chooseEvent(event);
       get('events').append(button);
     }
     get('message').textContent = '';
   } catch (error) { get('message').textContent = error.message + ' Reload this page to retry.'; }
+}
+
+// Leaving through the page links releases a selected seat before navigating.
+for (const link of [get('all-events'), document.querySelector('.brand')]) {
+  link.addEventListener('click', async (event) => {
+    if (event.ctrlKey || event.metaKey || event.shiftKey || event.altKey || event.button !== 0) return;
+    if (!selectedEvent) return;
+    event.preventDefault();
+    if (busy) return;
+    busy = true;
+    renderSeats();
+    if (selectedSeat) {
+      try {
+        await request('/api/selections', {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ eventId: selectedEvent.id, seatLabel: selectedSeat, ownerId }),
+        });
+      } catch { /* The existing hold expiry handles a failed release. */ }
+    }
+    window.location.assign(link.href);
+  });
 }
 start();

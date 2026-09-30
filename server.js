@@ -33,6 +33,14 @@ const events = [
   { id: 'indie-evening', name: 'Indie Evening', category: 'Music', venue: 'Rooftop Stage', schedule: 'Demo event · Sunday, 5 PM', price: 399 },
 ];
 
+// Event URLs share the same page and booking code.
+app.get('/events/:id', (req, res) => {
+  if (!events.some((event) => event.id === req.params.id)) {
+    return res.status(404).type('text').send('Event not found. Return to / to choose an event.');
+  }
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
+
 // 2. Connect once and add missing seats. Restarting never erases bookings.
 let databaseReady;
 function connectDatabase() {
